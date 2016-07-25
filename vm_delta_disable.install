@@ -1,0 +1,74 @@
+<?php
+
+/**
+ * @file
+ * Install file.
+ */
+
+/**
+ * Implements hook_uninstall().
+ */
+function vm_delta_disable_uninstall() {
+  db_delete('variable')
+    ->condition('name', "vm_delta_disable__%", "LIKE")
+    ->execute();
+}
+
+
+/**
+ * Implements hook_schema().
+ */
+function vm_delta_disable_schema() {
+
+  $schema['vm_delta_disable'] = array(
+    'fields' => array(
+      'id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+        'description' => 'The primary identifier for a disabled instance',
+      ),
+      'entity_type' => array(
+        'type' => 'varchar',
+        'length' => 32,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'bundle' => array(
+        'type' => 'varchar',
+        'length' => 128,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'field_name' => array(
+        'type' => 'varchar',
+        'length' => 32,
+        'not null' => TRUE,
+        'default' => '',
+      ),
+      'entity_id' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+      ),
+      'data' => array(
+        'type' => 'blob',
+        'size' => 'big',
+        'not null' => TRUE,
+        'serialize' => TRUE,
+      ),
+    ),
+    'primary key' => array('id'),
+    'indexes' => array(
+      'field_name_bundle' => array('entity_type', 'bundle', 'field_name'),
+      'entity_id_bundle' => array(
+        'entity_type',
+        'bundle',
+        'field_name',
+        'entity_id',
+      ),
+    ),
+  );
+
+  return $schema;
+
+}

@@ -1,0 +1,296 @@
+<?php
+
+/**
+ * @file
+ * Main module file for vm_delta_disable.
+ */
+
+/**
+ * Implements hook_menu().
+ */
+function vm_delta_disable_menu() {
+  $items = array();
+  $items['admin/structure/vm_delta_disable'] = array(
+    'title' => 'Deltas Disabled',
+    'description' => 'Disable field deltas display on certain content/entity types',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('vm_delta_disable_settings_form'),
+    'access arguments' => array('vm delta disable administer'),
+    'file' => 'vm_delta_disable.admin.inc',
+  );
+
+  $items['admin/structure/vm_delta_disable/view'] = array(
+    'title' => 'View deltas disabled',
+    'description' => 'View detailed list of entities that have disabled deltas',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('vm_delta_disable_view_disabled'),
+    'access arguments' => array('vm delta disable administer'),
+    'file' => 'vm_delta_disable.admin.inc',
+  );
+
+  $items['admin/structure/vm_delta_disable/enable/%'] = array(
+    'title' => 'Enable deltas',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('vm_delta_disable_remove_disable', 4),
+    'access arguments' => array('vm delta disable administer'),
+    'type' => MENU_CALLBACK,
+    'file' => 'vm_delta_disable.admin.inc',
+  );
+
+  return $items;
+}
+
+
+/**
+ * Implements hook_permission().
+ */
+function vm_delta_disable_permission() {
+  return array(
+    'vm delta disable administer' => array(
+      'title' => t('Administer vm Delta Disable'),
+      'description' => t('Administer entities for which this functionality is enabled'),
+    ),
+    'vm delta disable disable' => array(
+      'title' => t('Disable: view field delta'),
+      'description' => t('Provides the user the ability to disable specifc field deltas'),
+    ),
+
+  );
+}
+
+
+/**
+ * Checks if delta disable is active for specified entity type.
+ */
+function vm_delta_disable_is_active_bundle($entity_type, $bundle, $field_name = '') {
+  // Caching results for this query.
+  $state = &drupal_static(__FUNCTION__ . $entity_type . $bundle . $field_name);
+  if (isset($state)) {
+    return $state;
+  }
+
+  $state = (boolean) variable_get('vm_delta_disable__' . $entity_type . $bundle . '_state', 0);
+  if (!$state || !$field_name) {
+    return $state;
+  }
+
+  // If field_name is supplied, return state based on field selection as well.
+  $enabled_fields = variable_get('vm_delta_disable__' . $entity_type . $bundle . '_fields', array());
+  $state = isset($enabled_fields[$field_name]);
+  return $state;
+}
+
+
+/**
+ * Retreives disabled delta items for specified entity.
+ */
+function vm_delta_disable_get_disabled_deltas($entity_type, $bundle, $entity_id, $field_name = '') {
+  // Caching results for this query.
+  $returner = &drupal_static(__FUNCTION__ . $entity_type . $bundle . $entity_id . $field_name);
+  if (isset($returner)) {
+    return $returner;
+  }
+
+  $select = db_select('vm_delta_disable', 'vmdd')
+    ->condition('vmdd.entity_type', $entity_type)
+    ->condition('vmdd.bundle', $bundle)
+    ->condition('vmdd.entity_id', $entity_id);
+  if ($field_name) {
+    $select->condition('vmdd.field_name', $field_name);
+  }
+  $select->fields('vmdd');
+  $res = $select->execute()->fetchAll(PDO::FETCH_ASSOC);
+  if (!$res) {
+    // Caching no results.
+    $returner = array();
+    return $returner;
+  };
+
+  $returner = array();
+  foreach ($res as $result) {
+    $returner[$result['field_name']] = unserialize($result['data']);
+  }
+  return $returner;
+
+}
+
+
+/**
+ * Implements hook_field_widget_form_alter().
+ */
+function vm_delta_disable_field_widget_form_alter(&$element, &$form_state, $context) {
+  if (!user_access('vm delta disable disable')) {
+    return;
+  }
+
+  $entity_type = $context['instance']['entity_type'];
+  $bundle = $context['instance']['bundle'];
+  $field_name = $context['instance']['field_name'];
+
+  if (vm_delta_disable_is_active_bundle($entity_type, $bundle, $field_name)) {
+    $disable_label = t('[Disable this delta]');
+    if (isset($element[0])) {
+      list($entity_id, ,) = entity_extract_ids($entity_type, $element[0]['#entity']);
+
+      // #bn01 - not available on create forms.
+      if (!$entity_id) {
+        return;
+      }
+      $disabled_deltas = vm_delta_disable_get_disabled_deltas($entity_type, $bundle, $entity_id);
+
+      foreach ($element as $elm_key => $elm) {
+        if (is_numeric($elm_key) && is_int($elm_key)) {
+
+          $fname = '_vmdd_' . $elm['#field_name'] . '_' . $elm_key;
+          $def_value = (isset($disabled_deltas[$elm['#field_name']]) &&
+            in_array($elm_key, $disabled_deltas[$elm['#field_name']])) ? $fname : '';
+
+          $element[$elm_key][$fname] = array(
+            '#type' => 'checkbox',
+            '#title' => $disable_label,
+            '#return_value' => $fname,
+            '#default_value' => $def_value,
+            '#validated' => TRUE,
+            '#attributes' => array(
+              'name' => $fname,
+            ),
+          );
+        }
+      }
+    }
+    else {
+      list($entity_id, ,) = entity_extract_ids($entity_type, $element['#entity']);
+      // #bn01 - not available on create forms.
+      if (!$entity_id) {
+        return;
+      }
+      $disabled_deltas = vm_delta_disable_get_disabled_deltas(
+        $entity_type, $bundle, $entity_id, $element['#field_name']);
+
+      $fname = '_vmdd_' . $element['#field_name'] . '_0';
+      $def_value = (isset($disabled_deltas[$element['#field_name']]) &&
+        in_array(0, $disabled_deltas[$element['#field_name']])) ? $fname : '';
+
+      $element[$fname] = array(
+        '#type' => 'checkbox',
+        '#title' => $disable_label,
+        '#validated' => TRUE,
+        '#return_value' => $fname,
+        '#default_value' => $def_value,
+        '#validated' => TRUE,
+        '#attributes' => array(
+          'name' => $fname,
+        ),
+      );
+    }
+  }
+
+}
+
+
+/**
+ * Implements hook_field_attach_submit().
+ *
+ * Saves disabled delta values on field submit.
+ *
+ * @todo - (see #bn01) - find a way to get entity_id here when the node is new
+ *   so the module can be used on create forms too.
+ */
+function vm_delta_disable_field_attach_submit($entity_type, $entity, $form, &$form_state) {
+  if (!user_access('vm delta disable disable')) {
+    return;
+  }
+
+  list($entity_id, , $bundle) = entity_extract_ids($entity_type, $entity);
+  if (!$entity_id || !$bundle) {
+    return;
+  }
+  if (!vm_delta_disable_is_active_bundle($entity_type, $bundle)) {
+    return;
+  }
+
+  $value_found = FALSE;
+  $field_deltas = array();
+  foreach ($form_state['input'] as $input_key => $input_val) {
+    if (substr($input_key, 0, 6) !== '_vmdd_') {
+      continue;
+    }
+    $value_found = TRUE;
+    $field_name_delta = array_slice(explode('_', $input_key), 2);
+    $field_delta = array_pop($field_name_delta);
+    $field_name = implode('_', $field_name_delta);
+    if (!isset($field_deltas[$field_name])) {
+      $field_deltas[$field_name] = array();
+    }
+    $field_deltas[$field_name][] = (int) $field_delta;
+  }
+
+  db_delete('vm_delta_disable')
+    ->condition('entity_type', $entity_type)
+    ->condition('bundle', $bundle)
+    ->condition('entity_id', $entity_id)
+    ->execute();
+
+  if ($value_found && !empty($field_deltas)) {
+    foreach ($field_deltas as $field_name => $deltas) {
+      db_insert('vm_delta_disable')->fields(array(
+        'entity_type' => $entity_type,
+        'bundle' => $bundle,
+        'field_name' => $field_name,
+        'entity_id' => $entity_id,
+        'data' => serialize($deltas),
+      ))->execute();
+    }
+  }
+
+}
+
+
+/**
+ * Implements hook_field_attach_view_alter().
+ */
+function vm_delta_disable_field_attach_view_alter(&$output, $context) {
+  list($entity_id, , $bundle) = entity_extract_ids($context['entity_type'], $context['entity']);
+  if (!$entity_id || !$bundle) {
+    return;
+  }
+  // Check if delta disabling is activated for this type.
+  if (!vm_delta_disable_is_active_bundle($context['entity_type'], $bundle)) {
+    return;
+  }
+
+  $disabled_deltas = vm_delta_disable_get_disabled_deltas($context['entity_type'], $bundle, $entity_id);
+
+  foreach (element_children($output) as $field_name) {
+    if (!isset($disabled_deltas[$field_name])) {
+      continue;
+    }
+    $element = &$output[$field_name];
+    foreach ($disabled_deltas[$field_name] as $delta) {
+      if (isset($element['#items'][$delta])) {
+        unset($element['#items'][$delta]);
+      }
+      if (isset($element[$delta])) {
+        unset($element[$delta]);
+      }
+
+    }
+  }
+}
+
+
+/**
+ * Implements hook_entity_delete().
+ */
+function vm_delta_disable_entity_delete($entity, $type) {
+  list($entity_id, , $bundle) = entity_extract_ids($type, $entity);
+  if (!$entity_id || !$bundle) {
+    return;
+  }
+
+  db_delete('vm_delta_disable')
+    ->condition('entity_type', $type)
+    ->condition('bundle', $bundle)
+    ->condition('entity_id', $entity_id)
+    ->execute();
+}

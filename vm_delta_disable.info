@@ -1,0 +1,7 @@
+name = Delta Disable
+description = Provides a way to temporary disable field deltas without removing them.
+core = 7.x
+
+configure = admin/structure/vm_delta_disable
+
+dependencies[] = entity
